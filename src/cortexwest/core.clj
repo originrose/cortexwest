@@ -65,11 +65,11 @@
      (count test-ds)))
 
 (defn xy-cluster
-  [x y n label]
+  [& {:keys [x y scale n label]}]
   (repeatedly n
           (fn []
-            {:input [(+ x (rand-gaussian))
-                     (+ y (rand-gaussian))]
+            {:input [(+ x (* scale (rand-gaussian)))
+                     (+ y (* scale (rand-gaussian)))]
              :label label})))
 
 (defn input-map->vec
@@ -219,19 +219,20 @@
                 (viz-add-data model-data :layout :line))]
     (show-viz viz)))
 
+(def results* (atom nil))
 
 (defn classifier
   []
-  (let [train-a (xy-cluster 30 50 50 [1 0])
-        train-b (xy-cluster 20 10 50 [0 1])
+  (let [train-a (xy-cluster :x 30 :y 50 :scale 3 :n 100 :label [1.0 0])
+        train-b (xy-cluster :x 20 :y 10 :scale 2 :n 100 :label [0 1.0])
         train-data (concat train-a train-b)
-        test-a (xy-cluster 30 50 50 [1 0])
-        test-b (xy-cluster 20 10 50 [0 1])
+        test-a (xy-cluster :x 30 :y 50 :scale 3 :n 10 :label [1.0 0])
+        test-b (xy-cluster :x 20 :y 10 :scale 2 :n 10 :label [0 1.0])
         test-data (concat test-a test-b)
         network (network/linear-network
                   [(layers/input 2 1 1 :id :input)
-                   (layers/batch-normalization)
-                   (layers/linear->relu 20)
+                   (layers/linear->relu 50)
+                   (layers/linear->relu 30)
                    (layers/linear 2)
                    (layers/softmax :output-channels 2 :id :label)])
         epoch-count 10
@@ -239,24 +240,29 @@
         (loop [network network
                epoch 0]
          (if (> epoch-count epoch)
-            (recur (execute/train network (apply concat (repeat 50 train-data)) :batch-size 10) (inc epoch))
+           (let [data (shuffle (apply concat (repeat 200 train-data)))]
+             (recur (execute/train network data :batch-size 10)
+                    (inc epoch)))
             network))
-        predictions (execute/run network (take 30 test-data) :batch-size 10)
+        predictions (execute/run network test-data :batch-size 10)
+        _ (reset! results* predictions)
         predictions (map #(update-in % [:label] softmax-result-to-unit-vector) predictions)
         predictions (map merge test-data predictions)
         model-data (group-by :label predictions)
         ;_ (println model-data)
         a-data (input-map->vec (get model-data [1.0 0]))
         b-data (input-map->vec (get model-data [0 1.0]))
-        _ (println "results:" (count a-data) (count b-data))
+        _ (println "class counts a:" (count a-data) " b:" (count b-data))
         a-train-data (input-map->vec train-a)
         b-train-data (input-map->vec train-b)
         colors (hsv-rainbow)
         viz (-> (viz-for (concat a-train-data b-train-data))
-                (viz-add-data a-train-data :layout :scatter :color (nth colors 0))
-                (viz-add-data b-train-data :layout :scatter :color (nth colors 1))
-                (viz-add-data a-data :layout :scatter :color (nth colors 5))
-                (viz-add-data b-data :layout :scatter :color (nth colors 6))
+                (viz-add-data (take 10 a-train-data)
+                              :layout :scatter :color "rgb(10, 10, 10)")
+                (viz-add-data (take 10 b-train-data)
+                              :layout :scatter :color "rgb(10, 10, 10)")
+                (viz-add-data a-data :layout :scatter :color (nth colors 3))
+                (viz-add-data b-data :layout :scatter :color (nth colors 7))
                 )]
     (show-viz viz)))
 
