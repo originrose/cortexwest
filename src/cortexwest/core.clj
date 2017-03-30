@@ -183,12 +183,38 @@
                 (viz-add-data model-data :layout :line))]
     (show-viz viz)))
 
+(defn regression-wavy
+  []
+  (let [data (map wavy-line (t-math/norm-range 800))
+        data (filter #(and (> (first %) 0)
+                           (< (first %) 2))
+                     data)
+        x-data (map first data)
+        y-data (mat/scale (mapv second data) 5)
+        data (map (fn [x y] {:x x :y y}) x-data y-data)
+        network (network/linear-network
+                  [(layers/input 1 1 1 :id :x)
+                   (layers/linear 1 :id :y)])
+        epoch-count 8
+        network
+        (loop [network network
+               epoch 0]
+         (if (> epoch-count epoch)
+            (recur (execute/train network data :batch-size 3) (inc epoch))
+            network))
+        inferences (execute/run network (map #(dissoc % :y) data) :batch-size 50)
+        model-data (map vector x-data (map (comp first :y) inferences))
+        sample-data (map vector x-data y-data)
+        viz (-> (viz-for sample-data)
+                (viz-add-data sample-data :layout :line)
+                (viz-add-data model-data :layout :line))]
+    (show-viz viz)))
 
 (defn mlp-regression
   [& [net]]
-  (let [data (map wavy-line (t-math/norm-range 500))
+  (let [data (map wavy-line (t-math/norm-range 800))
         data (filter #(and (> (first %) 0)
-                           (< (first %) 1.5))
+                           (< (first %) 2))
                      data)
         x-data (map first data)
         y-data (mat/scale (mapv second data) 5)
@@ -200,26 +226,24 @@
                    (layers/linear->logistic 50)
                    (layers/linear->relu 30)
                    (layers/linear 1 :id :y)])
-        epoch-count 8
+        epoch-count 12
         trained-network
         (loop [net network
                epoch 0]
          (if (> epoch-count epoch)
-           (let [train-data (shuffle (apply concat (repeat 100 net-data)))
-                 new-net (execute/train net train-data :batch-size 100)
+           (let [train-data (shuffle (apply concat (repeat 200 net-data)))
+                 new-net (execute/train net train-data :batch-size 50)
                  mse (evaluate-network net net-data)]
              (println "mse: " mse)
             (recur new-net (inc epoch)))
             net))
-        inferences (execute/run trained-network test-ds :batch-size 10)
+        inferences (execute/run trained-network test-ds :batch-size 1)
         model-data (map vector x-data (map (comp first :y) inferences))
         sample-data (map vector x-data y-data)
         viz (-> (viz-for sample-data)
-                (viz-add-data sample-data :layout :line)
-                (viz-add-data model-data :layout :line))]
+                (viz-add-data sample-data :layout :line :color "blue")
+                (viz-add-data model-data :layout :line :color "red"))]
     (show-viz viz)))
-
-(def results* (atom nil))
 
 (defn classifier
   []
@@ -245,7 +269,6 @@
                     (inc epoch)))
             network))
         predictions (execute/run network test-data :batch-size 10)
-        _ (reset! results* predictions)
         predictions (map #(update-in % [:label] softmax-result-to-unit-vector) predictions)
         predictions (map merge test-data predictions)
         model-data (group-by :label predictions)
