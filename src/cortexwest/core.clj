@@ -16,21 +16,13 @@
     ;[tsne.core :as tsne]
     ))
 
+;;; Helpers
+
 (def random (java.util.Random.))
 
 (defn rand-gaussian
   []
   (.nextGaussian random))
-
-; linear regression with basic line
-
-; linear regression of polynomial
-
-; mlp regression
-
-; logistic regression classifier on some clusters
-
-; mlp classifier on some clusters
 
 (defn uuid
   []
@@ -41,6 +33,55 @@
   (str (System/getProperty "java.io.tmpdir")
        (uuid)
        ".svg"))
+
+(defn wavy-line
+  [t]
+  (let [x (t-math/mix (- PI) PI t)]
+    [x (* (Math/cos (* 0.5 x)) (Math/sin (* x x x)))]))
+
+(defn noisy-line
+  [m b noise x]
+  (+ (* m x) b (* noise (rand-gaussian))))
+
+(defn round10
+  [v]
+  (Math/pow 10
+            (Math/round (+ 0.5
+                           (Math/log10 v)
+                           (- (Math/log10 5.5))))))
+
+(defn evaluate-network
+  [network test-ds & {:keys [label-key batch-size ]
+                      :or {label-key :y
+                           batch-size 10}}]
+  (/ (Math/sqrt (->> (execute/run network test-ds :batch-size batch-size)
+                     (map
+                       (fn [a b]
+                         (Math/pow (- (get a label-key)
+                                      (first (get b label-key)))
+                                   2))
+                       test-ds)
+                     (reduce +)))
+     (count test-ds)))
+
+(defn xy-cluster
+  [x y n label]
+  (repeatedly n
+          (fn []
+            {:input [(+ x (rand-gaussian))
+                     (+ y (rand-gaussian))]
+             :label label})))
+
+(defn input-map->vec
+  [data]
+  (map
+    (fn [{:keys [input]}]
+      [(first input) (second input)])
+    data))
+
+
+
+;;; Visualization tools
 
 (defn export-viz
   [spec path]
@@ -56,26 +97,6 @@
     (export-viz spec path)
     (browse-url (str "file://" path))))
 
-(defn eq1
-  [t]
-  (let [x (t-math/mix (- PI) PI t)]
-    [x (* (Math/cos (* 0.5 x)) (Math/sin (* x x x)))]))
-
-(defn eq2
-  [t]
-  (let [x (t-math/mix (- PI) PI t)]
-    [x (Math/pow (* (Math/cos (* 0.5 x)) (Math/sin (* x x x))) 2)]))
-
-(defn poly3
-  [a b c x]
-  (+ (* a x) (* b x x) (* c x x x)))
-
-(defn round10
-  [v]
-  (Math/pow 10
-            (Math/round (+ 0.5
-                           (Math/log10 v)
-                           (- (Math/log10 5.5))))))
 (defn major-axis-for
   [v]
   (let [axis (round10 v)
@@ -137,9 +158,7 @@
                 :attribs {:fill "none" :stroke color}
                 :layout  layout})))
 
-(defn noisy-line
-  [m b noise x]
-  (+ (* m x) b (* noise (rand-gaussian))))
+;; Machine learning examples
 
 (defn regression
   []
@@ -165,30 +184,15 @@
     (show-viz viz)))
 
 
-(defn evaluate-network
-  [network test-ds & {:keys [label-key batch-size ]
-                      :or {label-key :y
-                           batch-size 10}}]
-  (/ (Math/sqrt (->> (execute/run network test-ds :batch-size batch-size)
-                     (map
-                       (fn [a b]
-                         (Math/pow (- (get a label-key)
-                                      (first (get b label-key)))
-                                   2))
-                       test-ds)
-                     (reduce +)))
-     (count test-ds)))
-
 (defn mlp-regression
   [& [net]]
-  (let [data (map eq1 (t-math/norm-range 500))
+  (let [data (map wavy-line (t-math/norm-range 500))
         data (filter #(and (> (first %) 0)
                            (< (first %) 1.5))
                      data)
         x-data (map first data)
         y-data (mat/scale (mapv second data) 5)
         net-data (map (fn [x y] {:x x :y y}) x-data y-data)
-        ;_ (println (take 50 net-data))
         test-ds (map #(dissoc % :y) net-data)
         network (network/linear-network
                   [(layers/input 1 1 1 :id :x)
@@ -214,22 +218,6 @@
                 (viz-add-data sample-data :layout :line)
                 (viz-add-data model-data :layout :line))]
     (show-viz viz)))
-
-
-(defn xy-cluster
-  [x y n label]
-  (repeatedly n
-          (fn []
-            {:input [(+ x (rand-gaussian))
-                     (+ y (rand-gaussian))]
-             :label label})))
-
-(defn m->v
-  [data]
-  (map
-    (fn [{:keys [input]}]
-      [(first input) (second input)])
-    data))
 
 
 (defn classifier
@@ -258,11 +246,11 @@
         predictions (map merge test-data predictions)
         model-data (group-by :label predictions)
         ;_ (println model-data)
-        a-data (m->v (get model-data [1.0 0]))
-        b-data (m->v (get model-data [0 1.0]))
+        a-data (input-map->vec (get model-data [1.0 0]))
+        b-data (input-map->vec (get model-data [0 1.0]))
         _ (println "results:" (count a-data) (count b-data))
-        a-train-data (m->v train-a)
-        b-train-data (m->v train-b)
+        a-train-data (input-map->vec train-a)
+        b-train-data (input-map->vec train-b)
         colors (hsv-rainbow)
         viz (-> (viz-for (concat a-train-data b-train-data))
                 (viz-add-data a-train-data :layout :scatter :color (nth colors 0))
@@ -271,11 +259,4 @@
                 (viz-add-data b-data :layout :scatter :color (nth colors 6))
                 )]
     (show-viz viz)))
-
-
-(defn plot-eq1
-  []
-  (let [data (map eq1 (t-math/norm-range 200))]
-    (show-viz (viz-spec data :layout :line))))
-
 
