@@ -10,6 +10,7 @@
     [clojure.core.matrix.stats :as stats]
     [cortex.nn.network :as network]
     [cortex.graph :as graph]
+    [cortex.loss :refer [softmax-result-to-unit-vector]]
     [cortex.nn.execute :as execute]
     [cortex.nn.layers :as layers]
     ;[tsne.core :as tsne]
@@ -178,11 +179,9 @@
                      (reduce +)))
      (count test-ds)))
 
-(def net* (atom nil))
-
 (defn mlp-regression
-  []
-  (let [data (map eq1 (t-math/norm-range 2000))
+  [& [net]]
+  (let [data (map eq1 (t-math/norm-range 500))
         data (filter #(and (> (first %) 0)
                            (< (first %) 1.5))
                      data)
@@ -194,15 +193,15 @@
         network (network/linear-network
                   [(layers/input 1 1 1 :id :x)
                    (layers/batch-normalization)
-                   (layers/linear->logistic 100)
+                   (layers/linear->logistic 50)
                    (layers/linear->relu 30)
                    (layers/linear 1 :id :y)])
-        epoch-count 5
+        epoch-count 8
         trained-network
         (loop [net network
                epoch 0]
          (if (> epoch-count epoch)
-           (let [train-data (shuffle (apply concat (repeat 300 net-data)))
+           (let [train-data (shuffle (apply concat (repeat 100 net-data)))
                  new-net (execute/train net train-data :batch-size 100)
                  mse (evaluate-network net net-data)]
              (println "mse: " mse)
@@ -214,37 +213,65 @@
         viz (-> (viz-for sample-data)
                 (viz-add-data sample-data :layout :line)
                 (viz-add-data model-data :layout :line))]
-    ;(println "inferences: " inferences)
-    (reset! net* network)
     (show-viz viz)))
 
 
-(defn mlp-classifier
+(defn xy-cluster
+  [x y n label]
+  (repeatedly n
+          (fn []
+            {:input [(+ x (rand-gaussian))
+                     (+ y (rand-gaussian))]
+             :label label})))
+
+(defn m->v
+  [data]
+  (map
+    (fn [{:keys [input]}]
+      [(first input) (second input)])
+    data))
+
+
+(defn classifier
   []
-  (let [class-a (map #(+ 3 ))
-        data (map eq1 (t-math/norm-range 200))
-        x-data (map first data)
-        y-data (map second data)
-        net-data (map (fn [x y] {:x x :y y}) x-data y-data)
+  (let [train-a (xy-cluster 30 50 50 [1 0])
+        train-b (xy-cluster 20 10 50 [0 1])
+        train-data (concat train-a train-b)
+        test-a (xy-cluster 30 50 50 [1 0])
+        test-b (xy-cluster 20 10 50 [0 1])
+        test-data (concat test-a test-b)
         network (network/linear-network
-                  [(layers/input 1 1 1 :id :x)
-                   (layers/linear 10)
-                   (layers/tanh)
-                   (layers/linear 1 :id :y)])
-        epoch-count 8
+                  [(layers/input 2 1 1 :id :input)
+                   (layers/batch-normalization)
+                   (layers/linear->relu 20)
+                   (layers/linear 2)
+                   (layers/softmax :output-channels 2 :id :label)])
+        epoch-count 10
         network
         (loop [network network
                epoch 0]
          (if (> epoch-count epoch)
-            (recur (execute/train network net-data :batch-size 3) (inc epoch))
+            (recur (execute/train network (apply concat (repeat 50 train-data)) :batch-size 10) (inc epoch))
             network))
-        inferences (execute/run network (map #(dissoc % :y) net-data) :batch-size 50)
-        model-data (map vector x-data (map (comp first :y) inferences))
-        sample-data (map vector x-data y-data)
-        viz (-> (viz-for sample-data)
-                (viz-add-data sample-data :layout :line)
-                (viz-add-data model-data :layout :line))]
+        predictions (execute/run network (take 30 test-data) :batch-size 10)
+        predictions (map #(update-in % [:label] softmax-result-to-unit-vector) predictions)
+        predictions (map merge test-data predictions)
+        model-data (group-by :label predictions)
+        ;_ (println model-data)
+        a-data (m->v (get model-data [1.0 0]))
+        b-data (m->v (get model-data [0 1.0]))
+        _ (println "results:" (count a-data) (count b-data))
+        a-train-data (m->v train-a)
+        b-train-data (m->v train-b)
+        colors (hsv-rainbow)
+        viz (-> (viz-for (concat a-train-data b-train-data))
+                (viz-add-data a-train-data :layout :scatter :color (nth colors 0))
+                (viz-add-data b-train-data :layout :scatter :color (nth colors 1))
+                (viz-add-data a-data :layout :scatter :color (nth colors 5))
+                (viz-add-data b-data :layout :scatter :color (nth colors 6))
+                )]
     (show-viz viz)))
+
 
 (defn plot-eq1
   []
